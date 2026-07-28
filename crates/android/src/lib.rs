@@ -12,13 +12,13 @@ use jni::sys::{jboolean, jbyteArray, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex};
 use tokio::runtime::Runtime;
 
 // ── Global State ────────────────────────────────────────────────────────
 
 static NODE_RUNNING: AtomicBool = AtomicBool::new(false);
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static RUNTIME: Mutex<Option<Runtime>> = Mutex::new(None);
 
 struct NodeState {
     shutdown: Option<freenet::ShutdownHandle>,
@@ -128,7 +128,7 @@ pub extern "system" fn Java_com_freenet_android_FreenetNode_start(
     });
 
     if started {
-        let _ = RUNTIME.set(rt);
+        let _ = RUNTIME.lock().unwrap().replace(rt);
         NODE_RUNNING.store(true, Ordering::SeqCst);
         JNI_TRUE
     } else {
@@ -149,12 +149,15 @@ pub extern "system" fn Java_com_freenet_android_FreenetNode_stop(
 
     let shutdown = STATE.lock().unwrap().shutdown.take();
     if let Some(h) = shutdown {
-        if let Some(rt) = RUNTIME.get() {
+        if let Some(rt) = RUNTIME.lock().unwrap().as_ref() {
             rt.block_on(h.shutdown());
         }
     }
 
-    STATE.lock().unwrap().ws_url = None;
+    let mut state = STATE.lock().unwrap();
+    state.shutdown = None;
+    state.ws_url = None;
+    drop(state);
     NODE_RUNNING.store(false, Ordering::SeqCst);
     JNI_TRUE
 }
