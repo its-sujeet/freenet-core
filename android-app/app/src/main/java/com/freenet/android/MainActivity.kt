@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stopButton: Button
     private lateinit var webView: WebView
 
+    private var lastWsUrl: String? = null
+
     private val postNotificationsPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -62,7 +64,10 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowContentAccess = true
+            allowFileAccess = true
         }
+        // Load embedded dashboard HTML
+        webView.loadUrl("file:///android_asset/dashboard.html")
 
         startButton.setOnClickListener { handleStart() }
         stopButton.setOnClickListener { handleStop() }
@@ -101,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, FreenetService::class.java)
         stopService(intent)
         Toast.makeText(this, "Stopping Freenet node...", Toast.LENGTH_SHORT).show()
+        lastWsUrl = null
     }
 
     private fun updateUi() {
@@ -121,11 +127,15 @@ class MainActivity : AppCompatActivity() {
                 val wsUrl = FreenetNode.getWsUrl()
                 urlText.text = wsUrl
 
-                // Load the Freenet dashboard in WebView
-                val dashboardUrl = wsUrl
-                    .replace("ws://", "http://")
-                    .replace("wss://", "https://")
-                webView.loadUrl(dashboardUrl)
+                // Inject WS URL into the embedded dashboard via JS
+                if (wsUrl != lastWsUrl && wsUrl.isNotEmpty()) {
+                    lastWsUrl = wsUrl
+                    val js = "javascript:(function(){" +
+                        "var ev=new MessageEvent('message',{data:{wsUrl:'$wsUrl'}});" +
+                        "window.dispatchEvent(ev);" +
+                        "})()"
+                    webView.evaluateJavascript(js, null)
+                }
             } else {
                 urlText.text = "Not connected"
                 webView.loadData("<html><body><h2>Freenet not running</h2><p>Start the node to see the dashboard.</p></body></html>", "text/html", "UTF-8")
